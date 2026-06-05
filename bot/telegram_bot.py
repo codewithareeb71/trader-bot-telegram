@@ -1,12 +1,16 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from datetime import datetime
+
 from .config import TELEGRAM_BOT_TOKEN
 from .signal_engine import generate_signal
 
+# =========================
+# CONFIG
+# =========================
 CURRENCY_PAIRS = [
-    "EUR_USD","GBP_USD","USD_JPY","USD_CHF","AUD_USD",
-    "USD_CAD","NZD_USD","EUR_GBP","GBP_JPY","USD_TRY"
+    "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD",
+    "USD_CAD", "NZD_USD", "EUR_GBP", "GBP_JPY", "USD_TRY"
 ]
 
 MAX_TRADES_PER_DAY = 10
@@ -16,15 +20,20 @@ trade_counter = {
     "date": datetime.utcnow().date()
 }
 
-# ================= APP =================
+# =========================
+# APP SETUP
+# =========================
 def create_app():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
+
     return app
 
-
-# ================= START =================
+# =========================
+# START COMMAND
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trade_counter["count"] = 0
     trade_counter["date"] = datetime.utcnow().date()
@@ -35,17 +44,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🚀 TRADING BOT READY\n\n"
-        "📊 Click below to get signal",
+        "📊 Click button to get signal\n"
+        f"⚡ Max Trades/Day: {MAX_TRADES_PER_DAY}",
         reply_markup=keyboard
     )
 
-
-# ================= BUTTON =================
+# =========================
+# BUTTON HANDLER
+# =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # reset daily
+    # reset daily counter
     if trade_counter["date"] != datetime.utcnow().date():
         trade_counter["count"] = 0
         trade_counter["date"] = datetime.utcnow().date()
@@ -56,49 +67,54 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if query.data == "get_signal":
-        best = None
+
+        best_signal = None
 
         for symbol in CURRENCY_PAIRS:
             sig = generate_signal(symbol)
-            if sig and sig.direction in ["BUY", "SELL"]:
-                if not best or sig.confidence > best.confidence:
-                    best = sig
 
-        if not best:
-            await query.message.reply_text("❌ No signal found")
+            if sig and sig.direction in ["BUY", "SELL"]:
+                if not best_signal or sig.confidence > best_signal.confidence:
+                    best_signal = sig
+
+        if not best_signal:
+            await query.message.reply_text("❌ No strong signal found")
             return
 
         trade_counter["count"] += 1
-        await send_signal(query, context, best)
+        await send_signal(query, context, best_signal)
 
-
-# ================= SEND =================
+# =========================
+# SEND SIGNAL
+# =========================
 async def send_signal(query, context, sig):
+
     caption = (
-        f"📊 {sig.direction} SIGNAL\n"
-        f"💱 {sig.symbol}\n"
-        f"🔥 {sig.confidence}%\n"
-        f"💰 {sig.price}\n"
-        f"📈 {sig.trend}\n"
+        f"📊 {sig.direction} SIGNAL\n\n"
+        f"💱 Pair: {sig.symbol}\n"
+        f"🔥 Confidence: {sig.confidence}%\n"
+        f"💰 Price: {sig.price}\n"
+        f"📈 Trend: {sig.trend}\n"
         f"⏰ Entry: {sig.entry_time}\n"
         f"⌛ Expiry: {sig.expiry_time}"
     )
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("WIN", callback_data="win"),
-            InlineKeyboardButton("LOSS", callback_data="loss")
+            InlineKeyboardButton("✅ WIN", callback_data="win"),
+            InlineKeyboardButton("❌ LOSS", callback_data="loss")
         ],
         [
-            InlineKeyboardButton("GET SIGNAL", callback_data="get_signal")
+            InlineKeyboardButton("📊 GET SIGNAL", callback_data="get_signal")
         ]
     ])
 
     await query.message.reply_text(caption, reply_markup=keyboard)
 
-
-# ================= RUN =================
+# =========================
+# RUN BOT
+# =========================
 def run_bot():
     app = create_app()
-    print("BOT RUNNING...")
+    print("🚀 BOT RUNNING...")
     app.run_polling()
