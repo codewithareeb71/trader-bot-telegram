@@ -1,6 +1,6 @@
 import requests
-from .config import OANDA_API_KEY, OANDA_BASE_URL
 import time
+from .config import OANDA_API_KEY, OANDA_BASE_URL
 
 HEADERS = {"Authorization": f"Bearer {OANDA_API_KEY}"}
 
@@ -8,7 +8,7 @@ def fetch_candles(symbol="EUR_USD", count=100, granularity="M1"):
     url = f"{OANDA_BASE_URL}/v3/instruments/{symbol}/candles"
     params = {"count": count, "granularity": granularity, "price": "M"}
 
-    for attempt in range(3):  # retry mechanism
+    for attempt in range(3):
         try:
             res = requests.get(url, headers=HEADERS, params=params, timeout=30)
             res.raise_for_status()
