@@ -3,9 +3,10 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from .signal_engine import generate_signal
 from .config import TELEGRAM_BOT_TOKEN
 from datetime import datetime
+import time
 
 # =========================
-# CURRENCY PAIRS
+# PAIRS
 # =========================
 CURRENCY_PAIRS = [
     "EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF", "AUD_USD",
@@ -13,13 +14,14 @@ CURRENCY_PAIRS = [
 ]
 
 # =========================
-# DAILY TRADE LIMIT
+# USER STATE (10 trades + cooldown)
 # =========================
-MAX_TRADES_PER_DAY = 5
-trade_counter = {"count": 0, "date": datetime.utcnow().date()}
+user_state = {}
+MAX_TRADES = 10
+COOLDOWN_SECONDS = 30 * 60
 
 # =========================
-# CREATE APP FUNCTION
+# APP
 # =========================
 def create_app():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
@@ -30,71 +32,86 @@ def create_app():
     return app
 
 # =========================
-# START COMMAND
+# START
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    trade_counter["count"] = 0
-    trade_counter["date"] = datetime.utcnow().date()
+    user_id = update.effective_user.id
+
+    user_state[user_id] = {
+        "count": 0,
+        "cooldown": 0,
+        "pair": "EUR_USD",
+        "timezone": "UTC"
+    }
 
     keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("💱 Select Pair", callback_data="pair")],
+        [InlineKeyboardButton("🌍 Select Timezone", callback_data="tz")],
         [InlineKeyboardButton("📊 GET SIGNAL", callback_data="get_signal")]
     ])
 
     await update.message.reply_text(
         "👋 Trading Bot Ready\n\n"
-        f"📌 Rules:\n• Max Trades/Day: {MAX_TRADES_PER_DAY}\n"
-        "• Only high confidence signals\n"
-        "• 2 min trade window\n\n"
-        "👇 Click button to start",
+        "📌 Rules:\n"
+        "• 10 Trades per session\n"
+        "• 30 min cooldown after limit\n"
+        "• Select your pair & timezone\n\n"
+        "👇 Start below",
         reply_markup=keyboard
     )
 
 # =========================
-# BUTTON HANDLER
+# HANDLER
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # Reset daily
-    if trade_counter["date"] != datetime.utcnow().date():
-        trade_counter["count"] = 0
-        trade_counter["date"] = datetime.utcnow().date()
+    user_id = query.from_user.id
 
-    # Daily limit
-    if trade_counter["count"] >= MAX_TRADES_PER_DAY:
-        await query.message.reply_text("⚠️ Daily limit reached (5 trades)")
+    if user_id not in user_state:
+        user_state[user_id] = {"count": 0, "cooldown": 0, "pair": "EUR_USD"}
+
+    state = user_state[user_id]
+
+    # cooldown check
+    if time.time() < state["cooldown"]:
+        await query.message.reply_text("⏳ 30 min cooldown active. Try later.")
         return
 
+    # GET SIGNAL
     if query.data == "get_signal":
-        best_signal = None
-        for symbol in CURRENCY_PAIRS:
-            sig = generate_signal(symbol)
-            if sig and sig.direction in ["BUY", "SELL"]:
-                if not best_signal or sig.confidence > best_signal.confidence:
-                    best_signal = sig
 
-        if not best_signal:
-            await query.message.reply_text("❌ No strong signal right now")
+        if state["count"] >= MAX_TRADES:
+            state["cooldown"] = time.time() + COOLDOWN_SECONDS
+            state["count"] = 0
+            await query.message.reply_text("⚠️ 10 trades done. 30 min cooldown started.")
             return
 
-        trade_counter["count"] += 1
-        await send_signal(query, context, best_signal)
+        symbol = state["pair"]
+        sig = generate_signal(symbol)
+
+        if not sig or sig.direction not in ["BUY", "SELL"]:
+            await query.message.reply_text("❌ No strong signal")
+            return
+
+        state["count"] += 1
+        await send_signal(query, context, sig)
 
 # =========================
 # SEND SIGNAL
 # =========================
 async def send_signal(query, context, sig):
+
     image_path = "assets/buy.png" if sig.direction == "BUY" else "assets/sell.png"
 
     caption = (
-        f"📊 {sig.direction} SIGNAL\n\n"
-        f"💱 Pair: {sig.symbol}\n"
-        f"🔥 Confidence: {sig.confidence}%\n"
-        f"💰 Price: {sig.price}\n"
-        f"⏰ Entry: {sig.entry_time}\n"
-        f"⌛ Expiry: {sig.expiry_time}\n"
-        f"📡 Trend: {sig.trend}"
+        f"● {sig.direction} SIGNAL\n\n"
+        f"{sig.symbol}\n"
+        f"🔥 {sig.confidence}%\n\n"
+        f"Entry: {sig.entry_time}\n"
+        f"Expiry: {sig.expiry_time}\n\n"
+        "⚡ Hurry — 25s left"
     )
 
     keyboard = InlineKeyboardMarkup([
@@ -102,9 +119,7 @@ async def send_signal(query, context, sig):
             InlineKeyboardButton("✅ WIN", callback_data="win"),
             InlineKeyboardButton("❌ LOSS", callback_data="loss")
         ],
-        [
-            InlineKeyboardButton("📊 GET SIGNAL", callback_data="get_signal")
-        ]
+        [InlineKeyboardButton("📊 GET SIGNAL", callback_data="get_signal")]
     ])
 
     try:
@@ -116,10 +131,10 @@ async def send_signal(query, context, sig):
                 reply_markup=keyboard
             )
     except Exception as e:
-        await query.message.reply_text(f"⚠️ IMAGE ERROR: {str(e)}")
+        await query.message.reply_text(f"ERROR: {e}")
 
 # =========================
-# RUN BOT
+# RUN
 # =========================
 def run_bot():
     app = create_app()

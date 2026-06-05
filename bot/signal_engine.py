@@ -7,8 +7,8 @@ from .logger import logger
 @dataclass
 class TradeSignal:
     symbol: str
-    direction: str        # BUY / SELL / NEUTRAL
-    status: str           # ACTIVE / WAIT
+    direction: str
+    status: str
     entry_time: str
     expiry_time: str
     confidence: float
@@ -17,58 +17,43 @@ class TradeSignal:
     message: str
     next_signal: str
 
-def generate_signal(symbol: str, trade_window_minutes: int = 2) -> Optional[TradeSignal]:
+def generate_signal(symbol: str) -> Optional[TradeSignal]:
     try:
         price = last_close_price(symbol)
-        trend_data = get_trend(symbol)
+        trend = get_trend(symbol)
         now = datetime.utcnow()
-        next_signal_time = (now + timedelta(minutes=5)).strftime("%H:%M UTC")
 
-        if price is None or price <= 0:
-            logger.warning("No market data for %s", symbol)
-            return TradeSignal(
-                symbol=symbol,
-                direction="NEUTRAL",
-                status="WAIT",
-                entry_time="--",
-                expiry_time="--",
-                confidence=0,
-                price=0,
-                trend="UNKNOWN",
-                message="Unable to fetch live market data.",
-                next_signal=next_signal_time
-            )
+        if not price:
+            return None
 
-        direction_raw = trend_data.get("direction", "UNKNOWN") if isinstance(trend_data, dict) else "UNKNOWN"
-        direction = "NEUTRAL"
-        status = "WAIT"
-        confidence = 0.0
-        message = "Market is not ready for trade."
+        direction_raw = trend.get("direction", "unknown")
 
-        if direction_raw in ["bullish", "bearish"]:
-            direction = "BUY" if direction_raw == "bullish" else "SELL"
-            confidence = 0.70 + min(price * 0.01, 0.05)
-            confidence = round(max(0.30, min(confidence, 0.90)), 2)
-            status = "ACTIVE"
-            message = f"{direction} trade ready. Execute within {trade_window_minutes} min."
-            entry_time = now.strftime("%H:%M UTC")
-            expiry_time = (now + timedelta(minutes=trade_window_minutes)).strftime("%H:%M UTC")
+        if direction_raw == "bullish":
+            direction = "BUY"
+        elif direction_raw == "bearish":
+            direction = "SELL"
         else:
-            entry_time = "--"
-            expiry_time = "--"
+            return None
+
+        # 🔥 ENTRY FIX (25 sec delay like real trading apps)
+        entry_dt = now + timedelta(seconds=25)
+        expiry_dt = entry_dt + timedelta(minutes=1)
+
+        confidence = 0.75
 
         return TradeSignal(
             symbol=symbol,
             direction=direction,
-            status=status,
-            entry_time=entry_time,
-            expiry_time=expiry_time,
+            status="ACTIVE",
+            entry_time=entry_dt.strftime("%H:%M:%S UTC"),
+            expiry_time=expiry_dt.strftime("%H:%M:%S UTC"),
             confidence=confidence,
             price=float(price),
             trend=direction_raw,
-            message=message,
-            next_signal=next_signal_time
+            message="signal ready",
+            next_signal=(now + timedelta(minutes=1)).strftime("%H:%M UTC")
         )
+
     except Exception as e:
-        logger.error("ENGINE ERROR: %s", e)
+        logger.error(e)
         return None
