@@ -1,14 +1,15 @@
 import requests
-from .config import OANDA_API_KEY, OANDA_BASE_URL
 import time
+from .config import OANDA_API_KEY, OANDA_BASE_URL
 
 HEADERS = {"Authorization": f"Bearer {OANDA_API_KEY}"}
+
 
 def fetch_candles(symbol="EUR_USD"):
     url = f"{OANDA_BASE_URL}/v3/instruments/{symbol}/candles"
     params = {"count": 50, "granularity": "M1", "price": "M"}
 
-    for i in range(3):
+    for _ in range(3):
         try:
             r = requests.get(url, headers=HEADERS, params=params, timeout=20)
             data = r.json()
@@ -29,18 +30,20 @@ def fetch_candles(symbol="EUR_USD"):
     return None
 
 
-def last_price(symbol):
+def last_close_price(symbol="EUR_USD"):
     data = fetch_candles(symbol)
     return data[-1] if data else None
 
 
-def trend(symbol):
+def get_trend(symbol="EUR_USD"):
     data = fetch_candles(symbol)
+
     if not data or len(data) < 3:
-        return "UNKNOWN"
+        return {"direction": "UNKNOWN"}
 
     if data[-1] > data[-2] > data[-3]:
-        return "BULLISH"
+        return {"direction": "bullish"}
     elif data[-1] < data[-2] < data[-3]:
-        return "BEARISH"
-    return "SIDEWAYS"
+        return {"direction": "bearish"}
+    else:
+        return {"direction": "sideways"}
