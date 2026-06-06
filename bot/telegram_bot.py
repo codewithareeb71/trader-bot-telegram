@@ -14,10 +14,12 @@ CURRENCY_PAIRS = [
 ]
 
 MAX_TRADES_PER_DAY = 10
+TRADE_RESET_MINUTES = 30  # 30 min rest after max trades
 
 trade_counter = {
     "count": 0,
-    "date": datetime.utcnow().date()
+    "date": datetime.utcnow().date(),
+    "last_reset": datetime.utcnow()
 }
 
 # =========================
@@ -25,10 +27,8 @@ trade_counter = {
 # =========================
 def create_app():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler))
-
     return app
 
 # =========================
@@ -37,6 +37,7 @@ def create_app():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     trade_counter["count"] = 0
     trade_counter["date"] = datetime.utcnow().date()
+    trade_counter["last_reset"] = datetime.utcnow()
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 GET SIGNAL", callback_data="get_signal")]
@@ -44,8 +45,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🚀 TRADING BOT READY\n\n"
-        "📊 Click button to get signal\n"
-        f"⚡ Max Trades/Day: {MAX_TRADES_PER_DAY}",
+        f"⚡ Max Trades/Day: {MAX_TRADES_PER_DAY}\n"
+        "📌 Click below to get a trade signal",
         reply_markup=keyboard
     )
 
@@ -56,29 +57,33 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    # reset daily counter
-    if trade_counter["date"] != datetime.utcnow().date():
+    # Reset counter daily
+    now = datetime.utcnow()
+    if trade_counter["date"] != now.date():
         trade_counter["count"] = 0
-        trade_counter["date"] = datetime.utcnow().date()
+        trade_counter["date"] = now.date()
+        trade_counter["last_reset"] = now
 
-    # limit check
-    if trade_counter["count"] >= MAX_TRADES_PER_DAY:
-        await query.message.reply_text("⚠️ Daily limit reached (10 trades)")
+    # Enforce rest period after max trades
+    elapsed = (now - trade_counter["last_reset"]).total_seconds() / 60
+    if trade_counter["count"] >= MAX_TRADES_PER_DAY and elapsed < TRADE_RESET_MINUTES:
+        await query.message.reply_text(f"⏸ Daily limit reached. Wait {int(TRADE_RESET_MINUTES - elapsed)} minutes.")
         return
+    elif elapsed >= TRADE_RESET_MINUTES:
+        trade_counter["count"] = 0
+        trade_counter["last_reset"] = now
 
     if query.data == "get_signal":
-
         best_signal = None
 
         for symbol in CURRENCY_PAIRS:
             sig = generate_signal(symbol)
-
             if sig and sig.direction in ["BUY", "SELL"]:
                 if not best_signal or sig.confidence > best_signal.confidence:
                     best_signal = sig
 
         if not best_signal:
-            await query.message.reply_text("❌ No strong signal found")
+            await query.message.reply_text("❌ No strong signal available right now.")
             return
 
         trade_counter["count"] += 1
@@ -88,7 +93,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # SEND SIGNAL
 # =========================
 async def send_signal(query, context, sig):
-
     caption = (
         f"📊 {sig.direction} SIGNAL\n\n"
         f"💱 Pair: {sig.symbol}\n"

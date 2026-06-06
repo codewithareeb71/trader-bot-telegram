@@ -1,1 +1,2 @@
-"""Telegram AI Trading Signal Bot package."""
+# bot/__init__.py
+# keep it empty
